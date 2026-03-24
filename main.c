@@ -118,8 +118,6 @@ void imprimirEstado(Estado e) {
 }
 
 void imprimirSolucao() {
-    printf("\nSOLUÇÃO: \n\n");
-
     for (int i = 0; i < tamanho_solucao; i++) {
         imprimirEstado(solucao[i]);
     }
