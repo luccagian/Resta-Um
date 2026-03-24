@@ -8,7 +8,7 @@
 #include <time.h>
 #define N 7
 #define TAM_BARRA 20
-
+#define MAX_PASSOS 100
 
 int rodando = 1;
 long estados_testados = 0;
@@ -20,18 +20,29 @@ time_t inicio;
 
 pthread_mutex_t lock;
 
-int tabuleiro [N][N] = 
-{#,#,1,1,1,#,#},
-{#,#,1,1,1,#,#},
-{1,1,1,1,1,1,1},
-{1,1,1,0,1,1,1},
-{1,1,1,1,1,1,1},
-{#,#,1,1,1,#,#},
-{#,#,1,1,1,#,#}
+int tabuleiro[N][N] = {
+    {-1,-1, 1, 1, 1,-1,-1},
+    {-1,-1, 1, 1, 1,-1,-1},
+    { 1, 1, 1, 1, 1, 1, 1},
+    { 1, 1, 1, 0, 1, 1, 1},
+    { 1, 1, 1, 1, 1, 1, 1},
+    {-1,-1, 1, 1, 1,-1,-1},
+    {-1,-1, 1, 1, 1,-1,-1}
+};
+
+typedef struct{
+    int tabuleiro[N][N];
+} Estado;
+
+Estado caminho[MAX_PASSOS];
+Estado solucao[MAX_PASSOS];
+
+int tamanho_caminho = 0;
+int tamanho_solucao = 0;
 
 // função que calcula o progresso da resolução
 int calcularProgresso() {
-    return ((pecas_iniciais - pecas_atuais_local) * 100) / (pecas_iniciais - 1);
+    return ((pecas_iniciais - pecas_iniciais) * 100) / (pecas_iniciais - 1);
 }
 
 // função que cria a barra de progresso
@@ -76,12 +87,12 @@ void* loading(void* arg) {
     long estados = estados_testados;
     pthread_mutex_unlock(&lock);
 
-    char barra_final[LARGURA_BARRA + 1];
+    char barra_final[TAM_BARRA + 1];
     barraProgresso(barra_final, 100);
 
     double tempo_total = difftime(time(NULL), inicio);
 
-    printf("\r[%s] Estados: %ld | Tempo: %.1fs\n",
+    printf("\r[%s] | Estados: %ld | Tempo: %.1fs\n",
            barra_final,
            estados,
            tempo_total);
@@ -89,75 +100,127 @@ void* loading(void* arg) {
     return NULL;
 }
 
-// função da resolução do jogo 
-// inserir no backtracking
-/*
-ao fazer o movimento
------
-pthread_mutex_lock(&lock);
+void imprimirEstado(Estado e) {
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < N; j++) {
 
-estados_testados++;
-pecas_atuais--;
+            if (e.tabuleiro[i][j] == 1)
+                printf("o");
+            else if (e.tabuleiro[i][j] == 0)
+                printf(" ");
+            else
+                printf("#"); 
 
-pthread_mutex_unlock(&lock);
-
-ao fazer movimento
------
-pthread_mutex_lock(&lock);
-
-estados_testados++;
-pecas_atuais--;
-
-pthread_mutex_unlock(&lock);
-*/
-
-Resolucao(int tab [N][N]){
-        se só resta 1 peça:
-        retornar verdadeiro
-
-    para cada movimento possível:
-
-        se movimento é válido:
-
-            fazer movimento
-
-            lock(mutex)
-                estados_testados++
-                pecas_atuais--
-            unlock(mutex)
-
-            se resolver(tabuleiro):
-                retornar verdadeiro
-
-            desfazer movimento
-
-            lock(mutex)
-                pecas_atuais++
-            unlock(mutex)
-
-    return false;
-
+        }
+        printf("\n");
+    }
+    printf("\n");
 }
 
+void imprimirSolucao() {
+    printf("\nSOLUÇÃO: \n\n");
+
+    for (int i = 0; i < tamanho_solucao; i++) {
+        imprimirEstado(solucao[i]);
+    }
+}
+
+Estado copiarTabuleiro(int tab[N][N]) {
+    Estado e;
+    
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < N; j++) {
+            e.tabuleiro[i][j] = tab[i][j];
+        }
+    }
+
+    return e;
+}
+
+int Resolucao(int tabuleiro[N][N], int pecas_atuais) {
+    // caso base
+    if (pecas_atuais == 1 && tabuleiro[3][3] == 1) {
+
+        tamanho_solucao = tamanho_caminho;
+        for (int i = 0; i < tamanho_caminho; i++) {
+            solucao[i] = caminho[i];
+        }
+
+        return 1;
+    }
+
+    // percorre tabuleiro
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < N; j++) {
+            if (tabuleiro[i][j] == 1) {
+                int di[4] = {-1, 1, 0, 0};
+                int dj[4] = {0, 0, -1, 1};
+
+                for (int d = 0; d < 4; d++) {
+                    int ni = i + di[d];
+                    int nj = j + dj[d];
+
+                    int fi = i + 2 * di[d];
+                    int fj = j + 2 * dj[d];
+
+                    // verifica limites e movimento válido
+                    if (fi >= 0 && fi < N && fj >= 0 && fj < N &&
+                        ni >= 0 && ni < N && nj >= 0 && nj < N &&
+                        tabuleiro[ni][nj] == 1 && tabuleiro[fi][fj] == 0) {
+
+                        // fazer movimento
+                        tabuleiro[i][j] = 0;
+                        tabuleiro[ni][nj] = 0;
+                        tabuleiro[fi][fj] = 1;
+
+                        pthread_mutex_lock(&lock);
+                        estados_testados++;
+                        pecas_atuais--;
+                        pthread_mutex_unlock(&lock);
+
+                        // salva estado
+                        caminho[tamanho_caminho++] = copiarTabuleiro(tabuleiro);
+
+                        // recursao
+                        if (Resolucao(tabuleiro, pecas_atuais)) {
+                            return 1;
+                        }
+
+                        // backtrack
+                        tamanho_caminho--;
+
+                        tabuleiro[i][j] = 1;
+                        tabuleiro[ni][nj] = 1;
+                        tabuleiro[fi][fj] = 0;
+
+                        pthread_mutex_lock(&lock);
+                        pecas_atuais++;
+                        pthread_mutex_unlock(&lock);
+                    }
+                }
+            }
+        }
+    }
+
+    return 0;
+}
 
 int main() {
     pthread_t t;
-
     pthread_mutex_init(&lock, NULL);
-
     inicio = time(NULL);
-
     pthread_create(&t, NULL, loading, NULL);
 
-    Resolucao(tabuleiro [N][N]);
+    caminho[tamanho_caminho++] = copiarTabuleiro(tabuleiro);
+    Resolucao(tabuleiro, pecas_atuais);
 
     rodando = 0;
 
     pthread_join(t, NULL);
-
     pthread_mutex_destroy(&lock);
 
-    printf("Resultado final exibido acima.\n");
+    printf("Resultado final exibido abaixo:\n");
+    imprimirSolucao();
 
     return 0;
 }
