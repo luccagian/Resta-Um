@@ -9,16 +9,22 @@
 #define TAM_BARRA 20
 #define MAX_PASSOS 100
 
+// controle da thread de loading
 int rodando = 1;
-long estados_testados = 0;
+// quantidade de estados explorados pela busca
+long total_estados_testados = 0;
 
+// total de pecas no inicio e durante a busca
 int pecas_iniciais = (N * N - 17);
 int pecas_atuais = (N * N - 17);
 
-time_t inicio;
+// marca o inicio para medir tempo de execucao
+time_t inicio_execucao;
 
-pthread_mutex_t lock;
+// protege variaveis compartilhadas entre as threads
+pthread_mutex_t mutex_estado;
 
+// -1 = fora do tabuleiro, 1 = peca, 0 = vazio
 int tabuleiro[N][N] = {
     {-1,-1, 1, 1, 1,-1,-1},
     {-1,-1, 1, 1, 1,-1,-1},
@@ -30,6 +36,7 @@ int tabuleiro[N][N] = {
 };
 
 typedef struct{
+    // snapshot completo do tabuleiro em um passo da busca
     int tabuleiro[N][N];
 } Estado;
 
@@ -46,10 +53,10 @@ int calcularProgresso() {
 
 // função que cria a barra de progresso
 void barraProgresso(char *barra, int progresso) {
-    int pos = (progresso * TAM_BARRA) / 100;
+    int posicao_preenchida = (progresso * TAM_BARRA) / 100;
 
     for (int i = 0; i < TAM_BARRA; i++) {
-        barra[i] = (i < pos) ? '#' : '-';
+        barra[i] = (i < posicao_preenchida) ? '#' : '-';
     }
     barra[TAM_BARRA] = '\0';
 }
@@ -58,16 +65,17 @@ void barraProgresso(char *barra, int progresso) {
 void* loading(void* arg) {
     char barra[TAM_BARRA + 1];
 
+    // atualiza periodicamente a barra enquanto a busca estiver rodando
     while (rodando) {
 
-        // leitura segura
-        pthread_mutex_lock(&lock);
-        long estados = estados_testados;
+        // leitura segura dos dados compartilhados entre as threads
+        pthread_mutex_lock(&mutex_estado);
+        long estados = total_estados_testados;
         int pecas = pecas_atuais;
-        pthread_mutex_unlock(&lock);
+        pthread_mutex_unlock(&mutex_estado);
 
         int progresso = calcularProgresso(pecas);
-        double tempo = difftime(time(NULL), inicio);
+        double tempo = difftime(time(NULL), inicio_execucao);
 
         barraProgresso(barra, progresso);
 
@@ -81,15 +89,15 @@ void* loading(void* arg) {
         usleep(100000);
     }
 
-    // final
-    pthread_mutex_lock(&lock);
-    long estados = estados_testados;
-    pthread_mutex_unlock(&lock);
+    // impressao final ao encerrar a busca
+    pthread_mutex_lock(&mutex_estado);
+    long estados = total_estados_testados;
+    pthread_mutex_unlock(&mutex_estado);
 
     char barra_final[TAM_BARRA + 1];
     barraProgresso(barra_final, 100);
 
-    double tempo_total = difftime(time(NULL), inicio);
+    double tempo_total = difftime(time(NULL), inicio_execucao);
 
     printf("\r[%s] | Estados: %ld | Tempo: %.1fs\n",
            barra_final,
@@ -99,13 +107,14 @@ void* loading(void* arg) {
     return NULL;
 }
 
-void imprimirEstado(Estado e) {
+void imprimirEstado(Estado estado) {
+    // o = peca, ' ' = vazio, # = fora do formato do tabuleiro
     for (int i = 0; i < N; i++) {
         for (int j = 0; j < N; j++) {
 
-            if (e.tabuleiro[i][j] == 1)
+            if (estado.tabuleiro[i][j] == 1)
                 printf("o");
-            else if (e.tabuleiro[i][j] == 0)
+            else if (estado.tabuleiro[i][j] == 0)
                 printf(" ");
             else
                 printf("#"); 
@@ -117,26 +126,27 @@ void imprimirEstado(Estado e) {
 }
 
 void imprimirSolucao() {
+    // imprime todos os estados desde o inicio ate a solucao
     for (int i = 0; i < tamanho_solucao; i++) {
         imprimirEstado(solucao[i]);
     }
 }
 
-Estado copiarTabuleiro(int tab[N][N]) {
-    Estado e;
+Estado copiarTabuleiro(int matriz_origem[N][N]) {
+    Estado estado_copiado;
     
     for (int i = 0; i < N; i++) {
         for (int j = 0; j < N; j++) {
-            e.tabuleiro[i][j] = tab[i][j];
+            estado_copiado.tabuleiro[i][j] = matriz_origem[i][j];
         }
     }
 
-    return e;
+    return estado_copiado;
 }
 
-int Resolucao(int tabuleiro[N][N], int pecas_atuais) {
-    // caso base
-    if (pecas_atuais == 1 && tabuleiro[3][3] == 1) {
+int Resolucao(int tabuleiro[N][N], int pecas_restantes) {
+    // caso base: encerra apenas com uma peca no centro
+    if (pecas_restantes == 1 && tabuleiro[3][3] == 1) {
 
         tamanho_solucao = tamanho_caminho;
         for (int i = 0; i < tamanho_caminho; i++) {
@@ -150,49 +160,51 @@ int Resolucao(int tabuleiro[N][N], int pecas_atuais) {
     for (int i = 0; i < N; i++) {
         for (int j = 0; j < N; j++) {
             if (tabuleiro[i][j] == 1) {
-                int di[4] = {-1, 1, 0, 0};
-                int dj[4] = {0, 0, -1, 1};
+                // deslocamentos para cima, baixo, esquerda e direita
+                int passo_linha[4] = {-1, 1, 0, 0};
+                int passo_coluna[4] = {0, 0, -1, 1};
 
                 for (int d = 0; d < 4; d++) {
-                    int ni = i + di[d];
-                    int nj = j + dj[d];
+                    int linha = i + passo_linha[d];
+                    int coluna = j + passo_coluna[d];
 
-                    int fi = i + 2 * di[d];
-                    int fj = j + 2 * dj[d];
+                    int linha_destino = i + 2 * passo_linha[d];
+                    int coluna_destino = j + 2 * passo_coluna[d];
 
-                    // verifica limites e movimento válido
-                    if (fi >= 0 && fi < N && fj >= 0 && fj < N &&
-                        ni >= 0 && ni < N && nj >= 0 && nj < N &&
-                        tabuleiro[ni][nj] == 1 && tabuleiro[fi][fj] == 0) {
+                    // verifica limites e movimento valido (pula sobre uma peca para cair em casa vazia)
+                    if (linha_destino >= 0 && linha_destino < N && coluna_destino >= 0 && coluna_destino < N &&
+                        linha >= 0 && linha < N && coluna >= 0 && coluna < N &&
+                        tabuleiro[linha][coluna] == 1 && tabuleiro[linha_destino][coluna_destino] == 0) {
 
                         // fazer movimento
                         tabuleiro[i][j] = 0;
-                        tabuleiro[ni][nj] = 0;
-                        tabuleiro[fi][fj] = 1;
+                        tabuleiro[linha][coluna] = 0;
+                        tabuleiro[linha_destino][coluna_destino] = 1;
 
-                        pthread_mutex_lock(&lock);
-                        estados_testados++;
-                        pecas_atuais--;
-                        pthread_mutex_unlock(&lock);
+                        // atualiza contadores compartilhados do progresso
+                        pthread_mutex_lock(&mutex_estado);
+                        total_estados_testados++;
+                        pecas_restantes--;
+                        pthread_mutex_unlock(&mutex_estado);
 
                         // salva estado
                         caminho[tamanho_caminho++] = copiarTabuleiro(tabuleiro);
 
                         // recursao
-                        if (Resolucao(tabuleiro, pecas_atuais)) {
+                        if (Resolucao(tabuleiro, pecas_restantes)) {
                             return 1;
                         }
 
-                        // backtrack
+                        // backtrack: desfaz o movimento para testar outro ramo
                         tamanho_caminho--;
 
                         tabuleiro[i][j] = 1;
-                        tabuleiro[ni][nj] = 1;
-                        tabuleiro[fi][fj] = 0;
+                        tabuleiro[linha][coluna] = 1;
+                        tabuleiro[linha_destino][coluna_destino] = 0;
 
-                        pthread_mutex_lock(&lock);
-                        pecas_atuais++;
-                        pthread_mutex_unlock(&lock);
+                        pthread_mutex_lock(&mutex_estado);
+                        pecas_restantes++;
+                        pthread_mutex_unlock(&mutex_estado);
                     }
                 }
             }
@@ -203,20 +215,24 @@ int Resolucao(int tabuleiro[N][N], int pecas_atuais) {
 }
 
 int main() {
-    pthread_t t;
-    pthread_mutex_init(&lock, NULL);
-    inicio = time(NULL);
-    pthread_create(&t, NULL, loading, NULL);
+    pthread_t thread_loading;
 
+    // inicializa recursos de concorrencia
+    pthread_mutex_init(&mutex_estado, NULL);
+    inicio_execucao = time(NULL);
+    pthread_create(&thread_loading, NULL, loading, NULL);
+
+    // primeiro estado do caminho e inicio da busca recursiva
     caminho[tamanho_caminho++] = copiarTabuleiro(tabuleiro);
     Resolucao(tabuleiro, pecas_atuais);
 
+    // encerra a thread de loading e libera recursos
     rodando = 0;
 
-    pthread_join(t, NULL);
-    pthread_mutex_destroy(&lock);
+    pthread_join(thread_loading, NULL);
+    pthread_mutex_destroy(&mutex_estado);
 
-    printf("Resultado final exibido abaixo:\n");
+    printf("\nResultado final exibido abaixo:\n\n");
     imprimirSolucao();
 
     return 0;
