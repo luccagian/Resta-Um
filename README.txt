@@ -8,7 +8,7 @@ INTEGRANTES:
 - Gabriel Ferreira (RA: 10442043)
 
 LINK DO VÍDEO (YOUTUBE):
-https://www.youtube.com/watch?v=EXEMPLO
+https://youtu.be/zCfLIDRZRCk
 
 INSTRUÇÕES DE COMPILAÇÃO:
 Para compilar o projeto no terminal Linux:
